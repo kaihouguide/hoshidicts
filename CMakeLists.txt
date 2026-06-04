@@ -31,6 +31,7 @@ add_library(hoshidicts
     src/zip/zip.cpp
     src/json/yomitan_parser.cpp
     src/text_processor/text_processor.cpp
+    src/language/generated_language_data.cpp
     src/deinflector.cpp
     src/query.cpp
     src/lookup.cpp
@@ -58,6 +59,10 @@ target_link_libraries(hoshidicts-cli PRIVATE
     hoshidicts
 )
 
+if(WIN32)
+    target_link_libraries(hoshidicts-cli PRIVATE shell32)
+endif()
+
 add_executable(benchmark-import
     benchmark/import.cpp
 )
@@ -73,3 +78,15 @@ add_executable(benchmark-lookup
 target_link_libraries(benchmark-lookup PRIVATE
     hoshidicts
 )
+
+enable_testing()
+
+add_executable(hoshidicts-language-tests
+    tests/language_tests.cpp
+)
+
+target_link_libraries(hoshidicts-language-tests PRIVATE
+    hoshidicts
+)
+
+add_test(NAME language-tests COMMAND hoshidicts-language-tests)

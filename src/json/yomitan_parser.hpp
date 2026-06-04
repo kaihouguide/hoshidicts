@@ -12,6 +12,8 @@ struct Index {
   bool isUpdatable;
   std::string_view indexUrl;
   std::string_view downloadUrl;
+  std::string_view sourceLanguage;
+  std::string_view targetLanguage;
 };
 
 struct Term {

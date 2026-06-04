@@ -9,7 +9,8 @@ struct glz::meta<Index> {
   static constexpr auto value =
       object("title", glz::raw_string<&T::title>, "revision", glz::raw_string<&T::revision>, "format", &T::format,
              "isUpdatable", &T::isUpdatable, "indexUrl", glz::raw_string<&T::indexUrl>, "downloadUrl",
-             glz::raw_string<&T::downloadUrl>);
+             glz::raw_string<&T::downloadUrl>, "sourceLanguage", glz::raw_string<&T::sourceLanguage>,
+             "targetLanguage", glz::raw_string<&T::targetLanguage>);
 };
 
 template <>
@@ -178,8 +179,11 @@ bool yomitan_parser::parse_pitch(std::string_view content, ParsedPitch& out) {
   }
 
   out.reading = parsed.reading;
-  out.pitches =
-      parsed.pitches | std::views::transform(&internal::PitchesArray::position) | std::ranges::to<std::vector>();
+  out.pitches.clear();
+  out.pitches.reserve(parsed.pitches.size());
+  for (const auto& pitch : parsed.pitches) {
+    out.pitches.push_back(pitch.position);
+  }
   return true;
 }
 
@@ -191,7 +195,10 @@ bool yomitan_parser::parse_ipa(std::string_view content, ParsedPitch& out) {
   }
 
   out.reading = parsed.reading;
-  out.transcriptions =
-      parsed.transcriptions | std::views::transform(&internal::TranscriptionsArray::ipa) | std::ranges::to<std::vector>();
+  out.transcriptions.clear();
+  out.transcriptions.reserve(parsed.transcriptions.size());
+  for (const auto& transcription : parsed.transcriptions) {
+    out.transcriptions.emplace_back(transcription.ipa);
+  }
   return true;
 }

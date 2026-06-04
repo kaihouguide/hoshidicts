@@ -504,7 +504,11 @@ ImportResult dictionary_importer::import(const std::string& zip_path, const std:
     auto hash_thread = std::async(std::launch::async, [&hash_entries, &path]() {
       hash::linear table;
       table.build_to_file(hash_entries, path + "/hash.table");
-      auto hashes = hash_entries | std::views::keys | std::ranges::to<std::vector>();
+      std::vector<uint64_t> hashes;
+      hashes.reserve(hash_entries.size());
+      for (const auto& [hash, _] : hash_entries) {
+        hashes.push_back(hash);
+      }
       hash::bloom::build_to_file(hashes, path + "/bloom.filter");
     });
 

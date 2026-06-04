@@ -5,6 +5,13 @@
 #include <iostream>
 #include <ranges>
 #include <string>
+#include <string_view>
+#include <vector>
+
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+#endif
 
 #include "../src/text_processor/text_processor.hpp"
 #include "hoshidicts/deinflector.hpp"
@@ -12,14 +19,53 @@
 #include "hoshidicts/lookup.hpp"
 #include "hoshidicts/query.hpp"
 
+std::vector<std::string> get_utf8_args(int argc, char* argv[]) {
+#ifdef _WIN32
+  int wide_argc = 0;
+  LPWSTR* wide_argv = CommandLineToArgvW(GetCommandLineW(), &wide_argc);
+  if (wide_argv == nullptr) {
+    return {};
+  }
+
+  std::vector<std::string> args;
+  args.reserve(wide_argc);
+  for (int i = 0; i < wide_argc; ++i) {
+    int size = WideCharToMultiByte(CP_UTF8, 0, wide_argv[i], -1, nullptr, 0, nullptr, nullptr);
+    if (size <= 0) {
+      args.emplace_back();
+      continue;
+    }
+    std::string arg(size - 1, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide_argv[i], -1, arg.data(), size, nullptr, nullptr);
+    args.push_back(std::move(arg));
+  }
+  LocalFree(wide_argv);
+  return args;
+#else
+  std::vector<std::string> args;
+  args.reserve(argc);
+  for (int i = 0; i < argc; ++i) {
+    args.emplace_back(argv[i]);
+  }
+  return args;
+#endif
+}
+
 void print_usage(const char* program) {
   std::cout << std::format("Usage:\n");
   std::cout << std::format("{} import <path/to/dictionary.zip>\n", program);
   std::cout << std::format("{} deinflect <word>\n", program);
+  std::cout << std::format("{} deinflect <language> <word>\n", program);
   std::cout << std::format("{} preprocess <word>\n", program);
+  std::cout << std::format("{} preprocess <language> <word>\n", program);
   std::cout << std::format("{} query <path/to/dictionary> <word>\n", program);
   std::cout << std::format("{} lookup <path/to/dictionary> <lookup_string>\n", program);
+  std::cout << std::format("{} lookup <language> <path/to/dictionary> <lookup_string>\n", program);
   std::cout << std::format("{} freq <path/to/dictionary> <word>\n", program);
+}
+
+bool is_supported_language(std::string_view language) {
+  return Deinflector(std::string(language)).language() == language;
 }
 
 void cmd_import(const std::string& path) {
@@ -45,8 +91,8 @@ void cmd_import(const std::string& path) {
   }
 }
 
-void cmd_deinflect(const std::string& inflected) {
-  Deinflector deinflector;
+void cmd_deinflect(const std::string& language, const std::string& inflected) {
+  Deinflector deinflector(language);
   auto results = deinflector.deinflect(inflected);
 
   std::cout << std::format("deinflections for: {} length: {}\n", inflected,
@@ -61,14 +107,16 @@ void cmd_deinflect(const std::string& inflected) {
         std::cout << std::format("{}{}", r.trace[i].name, i < r.trace.size() - 1 ? " -> " : "");
       }
       std::cout << std::format("\n");
+    } else {
+      std::cout << std::format("\n");
     }
   }
 }
 
-void cmd_preprocess(const std::string& text) {
-  auto results = text_processor::process(text);
+void cmd_preprocess(const std::string& language, const std::string& text) {
+  auto results = text_processor::process(text, language);
 
-  std::cout << std::format("preproccesing for: {} length: {}\n", text, utf8::distance(text.begin(), text.end()));
+  std::cout << std::format("preprocessing for: {} length: {}\n", text, utf8::distance(text.begin(), text.end()));
   std::cout << std::format("found {} variants\n", results.size());
 
   for (const auto& r : results) {
@@ -115,18 +163,18 @@ void cmd_freq(const std::string& path, const std::string& expression, const std:
   std::cout << std::format("count: {}\n", count);
 }
 
-void cmd_lookup(const std::vector<std::string>& db_paths, const std::string& lookup_string, int max_results = 8,
-                int scan_length = 16) {
+void cmd_lookup(const std::string& language, const std::vector<std::string>& db_paths, const std::string& lookup_string,
+                int max_results = 8, int scan_length = 16) {
   DictionaryQuery dict_query;
   for (const auto& path : db_paths) {
     dict_query.add_term_dict(path);
   }
-  Deinflector deinflect;
+  Deinflector deinflect(language);
   Lookup lookup(dict_query, deinflect);
   auto result = lookup.lookup(lookup_string, max_results, scan_length);
 
-  std::cout << std::format("lookup results for: {} max_results: {} scan_length: {}\n", lookup_string, max_results,
-                           scan_length);
+  std::cout << std::format("lookup results for: {} language: {} max_results: {} scan_length: {}\n", lookup_string,
+                           deinflect.language(), max_results, scan_length);
   std::cout << std::format("{} results\n", result.size());
 
   for (const auto& r : result) {
@@ -155,32 +203,46 @@ void cmd_lookup(const std::vector<std::string>& db_paths, const std::string& loo
 }
 
 int main(int argc, char* argv[]) {
-  if (argc < 2) {
-    print_usage(argv[0]);
+  const auto args = get_utf8_args(argc, argv);
+  if (args.size() < 2) {
+    print_usage(args.empty() ? "hoshidicts-cli" : args[0].c_str());
     return 1;
   }
 
   const auto begin = std::chrono::steady_clock::now();
-  std::string_view command = argv[1];
+  std::string_view command = args[1];
 
-  if (command == "import" && argc >= 3) {
-    cmd_import(argv[2]);
-  } else if (command == "deinflect" && argc >= 3) {
-    cmd_deinflect(argv[2]);
-  } else if (command == "preprocess" && argc >= 3) {
-    cmd_preprocess(argv[2]);
-  } else if (command == "query" && argc >= 4) {
-    cmd_query(argv[2], argv[3]);
-  } else if (command == "lookup" && argc >= 4) {
-    auto db_paths = std::views::counted(argv + 2, argc - 3) |
-                    std::views::transform([](const char* arg) { return std::string(arg); }) |
-                    std::ranges::to<std::vector>();
-    std::string term = argv[argc - 1];
-    cmd_lookup(db_paths, term);
-  } else if (command == "freq" && argc >= 5) {
-    cmd_freq(argv[2], argv[3], argv[4]);
+  if (command == "import" && args.size() >= 3) {
+    cmd_import(args[2]);
+  } else if (command == "deinflect" && args.size() >= 4) {
+    cmd_deinflect(args[2], args[3]);
+  } else if (command == "deinflect" && args.size() >= 3) {
+    cmd_deinflect("ja", args[2]);
+  } else if (command == "preprocess" && args.size() >= 4) {
+    cmd_preprocess(args[2], args[3]);
+  } else if (command == "preprocess" && args.size() >= 3) {
+    cmd_preprocess("ja", args[2]);
+  } else if (command == "query" && args.size() >= 4) {
+    cmd_query(args[2], args[3]);
+  } else if (command == "lookup" && args.size() >= 4) {
+    std::string language = "ja";
+    size_t first_dict_arg = 2;
+    if (args.size() >= 5 && is_supported_language(args[2])) {
+      language = args[2];
+      first_dict_arg = 3;
+    }
+
+    std::vector<std::string> db_paths;
+    db_paths.reserve(args.size() - first_dict_arg - 1);
+    for (size_t i = first_dict_arg; i < args.size() - 1; ++i) {
+      db_paths.emplace_back(args[i]);
+    }
+    std::string term = args.back();
+    cmd_lookup(language, db_paths, term);
+  } else if (command == "freq" && args.size() >= 5) {
+    cmd_freq(args[2], args[3], args[4]);
   } else {
-    print_usage(argv[0]);
+    print_usage(args[0].c_str());
     return 1;
   }
 
